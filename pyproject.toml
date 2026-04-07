@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watersight-export"
+version = "0.1.0"
+description = "Scrape water usage from WaterInsight portals and export to InfluxDB & Home Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "requests>=2.31,<3",
+    "influxdb-client>=1.38,<2",
+]
+
+[project.scripts]
+watersight-export = "watersight_export.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

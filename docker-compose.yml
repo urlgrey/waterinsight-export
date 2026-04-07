@@ -1,0 +1,13 @@
+services:
+  watersight-export:
+    image: skidder/watersight-export:latest
+    container_name: watersight-export
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - watersight-data:/data
+    # Use host network to reach InfluxDB/HA on the LAN
+    network_mode: host
+
+volumes:
+  watersight-data:
