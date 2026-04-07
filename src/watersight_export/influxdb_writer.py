@@ -39,7 +39,6 @@ class InfluxDBWriter:
             points.append(p)
 
         if points:
-            # Write in batches of 5000
             batch_size = 5000
             for i in range(0, len(points), batch_size):
                 batch = points[i : i + batch_size]
@@ -53,18 +52,35 @@ class InfluxDBWriter:
         """Write daily records extracted from weatherConsumptionChart."""
         daily = chart_data.get("data", {}).get("chartData", {}).get("dailyData", {})
         categories = daily.get("categories", [])
-        you_values = daily.get("you", [])
 
-        if len(categories) != len(you_values):
-            log.warning("Category/value length mismatch: %d vs %d", len(categories), len(you_values))
-            count = min(len(categories), len(you_values))
-        else:
-            count = len(categories)
+        # The API uses "consumption" for the user's daily gallons, not "you"
+        values = (
+            daily.get("consumption")
+            or daily.get("you")
+            or daily.get("series", [{}])[0].get("data", [])
+            if daily.get("series")
+            else []
+        )
+        # Fallback: try all plausible keys
+        if not values:
+            for key in ["consumption", "you", "gallons", "usage"]:
+                values = daily.get(key, [])
+                if values:
+                    log.info("Found daily values under key '%s'", key)
+                    break
+
+        if not values:
+            log.warning("No daily values found. Available keys: %s", list(daily.keys()))
+            return 0
+
+        count = min(len(categories), len(values))
+        if len(categories) != len(values):
+            log.warning("Category/value length mismatch: %d vs %d (using %d)", len(categories), len(values), count)
 
         points = []
         for i in range(count):
             date_str = categories[i]
-            gallons = you_values[i]
+            gallons = values[i]
             if gallons is None:
                 continue
             try:
