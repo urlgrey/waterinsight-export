@@ -28,7 +28,7 @@ class HAPublisher:
             attributes={
                 "unit_of_measurement": "gal",
                 "device_class": "water",
-                "state_class": "total_increasing",
+                "state_class": "measurement",
                 "friendly_name": "Water Usage Today",
                 "date": date,
                 "icon": "mdi:water",
@@ -46,13 +46,29 @@ class HAPublisher:
             attributes={
                 "unit_of_measurement": "gal",
                 "device_class": "water",
-                "state_class": "total_increasing",
+                "state_class": "measurement",
                 "friendly_name": "Water Usage This Month",
                 "month": month,
                 "icon": "mdi:water-pump",
             },
         )
         log.info("Published monthly water usage: %.1f gal (%s)", gallons, month)
+
+    def publish_total(self, total_gallons: float) -> None:
+        """Set sensor.water_usage_total_gallons — cumulative meter reading for HA Energy dashboard."""
+        self._set_state(
+            entity_id="sensor.water_usage_total_gallons",
+            state=round(total_gallons, 1),
+            attributes={
+                "unit_of_measurement": "gal",
+                "device_class": "water",
+                "state_class": "total_increasing",
+                "friendly_name": "Water Meter Total",
+                "icon": "mdi:water-check",
+                "last_reset": None,
+            },
+        )
+        log.info("Published total water usage: %.1f gal", total_gallons)
 
     def _set_state(self, entity_id: str, state: float, attributes: dict) -> None:
         url = f"{self.url}/api/states/{entity_id}"

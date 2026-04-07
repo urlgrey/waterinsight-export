@@ -61,7 +61,8 @@ def compute_today_and_month(hourly: list[dict]) -> tuple[float, float]:
         if ts >= today_ts:
             today_gal += gal
 
-    return today_gal, month_gal
+    total_gal = sum((rec.get("gallons") or 0) for rec in hourly)
+    return today_gal, month_gal, total_gal
 
 
 def sync_once(
@@ -107,9 +108,10 @@ def sync_once(
 
     # 5. Publish to Home Assistant
     if ha and hourly:
-        today_gal, month_gal = compute_today_and_month(hourly)
+        today_gal, month_gal, total_gal = compute_today_and_month(hourly)
         ha.publish_daily(today_gal)
         ha.publish_monthly(month_gal)
+        ha.publish_total(total_gal)
 
     # 6. Save sync state
     if hourly:
