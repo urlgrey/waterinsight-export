@@ -9,7 +9,8 @@ import requests
 log = logging.getLogger(__name__)
 
 DEFAULT_URL = "https://benicia.waterinsight.com"
-LOGIN_PATH = "/index.php/welcome"
+LOGIN_PAGE = "/index.php/welcome/login"
+LOGIN_POST = "/index.php/welcome/login?forceEmail=1"
 REALTIME_PATH = "/index.php/rest/v1/Chart/RealTimeChart"
 WEATHER_PATH = "/index.php/rest/v1/Chart/weatherConsumptionChart"
 BILLING_PATH = "/index.php/rest/v1/Chart/BillingHistoryChart"
@@ -27,8 +28,9 @@ class WaterSightClient:
         self.retries = retries
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (watersight-export/0.1)",
-            "Accept": "application/json, text/html, */*",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         })
 
     # ------------------------------------------------------------------
@@ -46,34 +48,51 @@ class WaterSightClient:
                 time.sleep(2 ** attempt)
 
     def _do_login(self) -> None:
-        # 1. GET login page to obtain CSRF token & session cookie
-        resp = self.session.get(f"{self.base_url}{LOGIN_PATH}", timeout=30)
+        # 1. GET the login page to establish session cookie
+        resp = self.session.get(f"{self.base_url}{LOGIN_PAGE}", timeout=30)
         resp.raise_for_status()
+        log.debug("Login page status: %d, URL: %s", resp.status_code, resp.url)
 
-        # CodeIgniter CSRF token is typically in a hidden input
-        csrf_match = re.search(
-            r'<input\s+type="hidden"\s+name="([^"]+)"\s+value="([^"]+)"', resp.text
+        # Extract CSRF token if present (hidden input named "token")
+        token_match = re.search(
+            r'<input\s+type="hidden"\s+name="token"\s+value="([^"]*)"', resp.text
         )
-        post_data: dict[str, str] = {
+        csrf_token = token_match.group(1) if token_match else ""
+
+        # 2. POST credentials to the login endpoint
+        post_data = {
             "email": self.email,
             "password": self.password,
+            "token": csrf_token,
         }
-        if csrf_match:
-            post_data[csrf_match.group(1)] = csrf_match.group(2)
 
-        # Detect POST target from <form action="...">
-        form_match = re.search(r'<form[^>]+action="([^"]+)"', resp.text)
-        login_url = form_match.group(1) if form_match else f"{self.base_url}/index.php/login"
-        if login_url.startswith("/"):
-            login_url = f"{self.base_url}{login_url}"
-
-        # 2. POST credentials
-        resp = self.session.post(login_url, data=post_data, timeout=30, allow_redirects=True)
+        resp = self.session.post(
+            f"{self.base_url}{LOGIN_POST}",
+            data=post_data,
+            timeout=30,
+            allow_redirects=True,
+            headers={
+                "Referer": f"{self.base_url}{LOGIN_PAGE}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
         resp.raise_for_status()
 
-        # Verify login — a successful login redirects to /index.php/home or similar
-        if "login" in resp.url.lower() and "home" not in resp.url.lower():
-            raise RuntimeError(f"Login likely failed — landed on {resp.url}")
+        log.debug("Post-login URL: %s", resp.url)
+        log.debug("Post-login cookies: %s", list(self.session.cookies.keys()))
+
+        # Verify login succeeded — after login we should NOT be on the login page
+        if "/welcome/login" in resp.url.lower():
+            # Check for error messages in the response
+            error_match = re.search(r'class="error-message"[^>]*>(.*?)</div>', resp.text, re.DOTALL)
+            error_text = error_match.group(1).strip() if error_match else ""
+            raise RuntimeError(
+                f"Login failed — still on login page. Error: {error_text or 'unknown'}"
+            )
+
+        # Verify we have more than just PHPSESSID (successful login sets additional cookies)
+        if len(self.session.cookies) < 2:
+            log.warning("Login may have failed — only %d cookies set", len(self.session.cookies))
 
     # ------------------------------------------------------------------
     def get_realtime(self) -> list[dict[str, Any]]:
@@ -102,6 +121,16 @@ class WaterSightClient:
     def _api_get(self, path: str, params: dict | None = None) -> dict:
         url = f"{self.base_url}{path}"
         log.debug("GET %s", url)
-        resp = self.session.get(url, params=params, timeout=120)
+        resp = self.session.get(
+            url,
+            params=params,
+            timeout=120,
+            headers={"Accept": "application/json, text/html, */*"},
+        )
+        if resp.status_code == 403:
+            log.error("403 Forbidden on %s — session may have expired, re-login needed", path)
+            raise requests.exceptions.HTTPError(
+                f"403 Forbidden: {path} — likely not authenticated", response=resp
+            )
         resp.raise_for_status()
         return resp.json()
