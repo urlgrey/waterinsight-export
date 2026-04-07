@@ -4,7 +4,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.12-slim
-LABEL org.opencontainers.image.source="https://github.com/skidder/watersight-export"
+LABEL org.opencontainers.image.source="https://github.com/skidder/waterinsight-export"
 
 RUN groupadd -r app && useradd -r -g app -d /app app
 COPY --from=builder /install /usr/local

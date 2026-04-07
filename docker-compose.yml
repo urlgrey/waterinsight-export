@@ -1,7 +1,7 @@
 services:
-  watersight-export:
-    image: skidder/watersight-export:latest
-    container_name: watersight-export
+  waterinsight-export:
+    image: skidder/waterinsight-export:latest
+    container_name: waterinsight-export
     restart: unless-stopped
     env_file: .env
     volumes:

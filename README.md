@@ -1,4 +1,4 @@
-# watersight-export
+# waterinsight-export
 
 Scrapes water usage data from [WaterInsight](https://benicia.waterinsight.com) portals (used by Benicia, CA and other municipalities) and exports it to **InfluxDB v2** and **Home Assistant**.
 
@@ -34,7 +34,7 @@ docker compose up -d
 ### One-shot run
 
 ```bash
-docker run --rm --env-file .env -v watersight-data:/data skidder/watersight-export:latest
+docker run --rm --env-file .env -v watersight-data:/data skidder/waterinsight-export:latest
 ```
 
 (Omit `--daemon` from CMD to run once and exit.)
@@ -76,7 +76,7 @@ python -m watersight_export.main
 WaterInsight Portal
         │
         ▼ (login + REST API)
- watersight-export
+ waterinsight-export
         │
         ├──▶ InfluxDB v2 (hourly + daily time series)
         │
@@ -86,7 +86,7 @@ WaterInsight Portal
 
 ## CI/CD
 
-GitHub Actions builds multi-arch Docker images on every push to `main` and on version tags (`v*`). Images are pushed to Docker Hub as `skidder/watersight-export`.
+GitHub Actions builds multi-arch Docker images on every push to `main` and on version tags (`v*`). Images are pushed to Docker Hub as `skidder/waterinsight-export`.
 
 ### Required GitHub Secrets
 
