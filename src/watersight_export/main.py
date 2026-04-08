@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .watersight_client import WaterSightClient
@@ -42,27 +42,49 @@ def save_sync_state(state: dict) -> None:
     SYNC_FILE.write_text(json.dumps(state, indent=2))
 
 
-def compute_today_and_month(hourly: list[dict]) -> tuple[float, float]:
-    """Sum gallons for today and current month from hourly data."""
+def compute_stats(hourly: list[dict]) -> dict:
+    """Compute daily, monthly, total, and latest-hour stats from hourly data."""
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    today_ts = int(today_start.timestamp())
+    # Yesterday (complete day — today's data may be incomplete due to utility lag)
+    yesterday = now - timedelta(days=1)
+    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end = yesterday_start + timedelta(days=1)
+    yesterday_start_ts = int(yesterday_start.timestamp())
+    yesterday_end_ts = int(yesterday_end.timestamp())
+
+    # Current month
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_ts = int(month_start.timestamp())
 
-    today_gal = 0.0
+    yesterday_gal = 0.0
     month_gal = 0.0
+    total_gal = 0.0
+    latest_ts = 0
+    latest_gal = 0.0
+
     for rec in hourly:
         ts = rec.get("read_datetime", 0)
         gal = rec.get("gallons") or 0
+        total_gal += gal
+
+        if yesterday_start_ts <= ts < yesterday_end_ts:
+            yesterday_gal += gal
         if ts >= month_ts:
             month_gal += gal
-        if ts >= today_ts:
-            today_gal += gal
+        if ts > latest_ts:
+            latest_ts = ts
+            latest_gal = gal
 
-    total_gal = sum((rec.get("gallons") or 0) for rec in hourly)
-    return today_gal, month_gal, total_gal
+    return {
+        "yesterday_gal": yesterday_gal,
+        "yesterday_date": yesterday_start.strftime("%Y-%m-%d"),
+        "month_gal": month_gal,
+        "month_label": month_start.strftime("%Y-%m"),
+        "total_gal": total_gal,
+        "latest_ts": latest_ts,
+        "latest_gal": latest_gal,
+    }
 
 
 def sync_once(
@@ -108,10 +130,22 @@ def sync_once(
 
     # 5. Publish to Home Assistant
     if ha and hourly:
-        today_gal, month_gal, total_gal = compute_today_and_month(hourly)
-        ha.publish_daily(today_gal)
-        ha.publish_monthly(month_gal)
-        ha.publish_total(total_gal)
+        stats = compute_stats(hourly)
+
+        # Latest hourly reading
+        ha.publish_hourly(stats["latest_gal"], stats["latest_ts"])
+
+        # Yesterday's complete total (avoids the data-lag issue with "today")
+        ha.publish_daily(stats["yesterday_gal"], stats["yesterday_date"])
+
+        # Running monthly total
+        ha.publish_monthly(stats["month_gal"], stats["month_label"])
+
+        # Cumulative total for Energy dashboard
+        ha.publish_total(stats["total_gal"])
+
+        # When data was last recorded by the utility
+        ha.publish_last_updated(stats["latest_ts"])
 
     # 6. Save sync state
     if hourly:

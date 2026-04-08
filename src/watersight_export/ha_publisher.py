@@ -18,10 +18,25 @@ class HAPublisher:
             "Content-Type": "application/json",
         }
 
-    def publish_daily(self, gallons: float, date: str | None = None) -> None:
-        """Set sensor.water_usage_daily_gallons."""
-        if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    def publish_hourly(self, gallons: float, timestamp: int) -> None:
+        """Set sensor.water_usage_hourly_gallons — most recent hourly reading."""
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        self._set_state(
+            entity_id="sensor.water_usage_hourly_gallons",
+            state=round(gallons, 2),
+            attributes={
+                "unit_of_measurement": "gal",
+                "device_class": "water",
+                "state_class": "measurement",
+                "friendly_name": "Water Usage (Latest Hour)",
+                "reading_time": dt.isoformat(),
+                "icon": "mdi:water-outline",
+            },
+        )
+        log.info("Published hourly water usage: %.2f gal (reading from %s)", gallons, dt.isoformat())
+
+    def publish_daily(self, gallons: float, date: str) -> None:
+        """Set sensor.water_usage_daily_gallons — yesterday's complete total."""
         self._set_state(
             entity_id="sensor.water_usage_daily_gallons",
             state=round(gallons, 1),
@@ -29,7 +44,7 @@ class HAPublisher:
                 "unit_of_measurement": "gal",
                 "device_class": "water",
                 "state_class": "measurement",
-                "friendly_name": "Water Usage Today",
+                "friendly_name": "Water Usage Yesterday",
                 "date": date,
                 "icon": "mdi:water",
             },
@@ -70,7 +85,21 @@ class HAPublisher:
         )
         log.info("Published total water usage: %.1f gal", total_gallons)
 
-    def _set_state(self, entity_id: str, state: float, attributes: dict) -> None:
+    def publish_last_updated(self, timestamp: int) -> None:
+        """Set sensor.water_usage_last_updated — when the latest data was recorded."""
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        self._set_state(
+            entity_id="sensor.water_usage_last_updated",
+            state=dt.isoformat(),
+            attributes={
+                "device_class": "timestamp",
+                "friendly_name": "Water Data Last Updated",
+                "icon": "mdi:clock-check-outline",
+            },
+        )
+        log.info("Published last updated: %s", dt.isoformat())
+
+    def _set_state(self, entity_id: str, state: float | str, attributes: dict) -> None:
         url = f"{self.url}/api/states/{entity_id}"
         payload = {"state": str(state), "attributes": attributes}
         try:
