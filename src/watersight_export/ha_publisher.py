@@ -106,4 +106,9 @@ class HAPublisher:
             resp = requests.post(url, json=payload, headers=self.headers, timeout=10)
             resp.raise_for_status()
         except Exception as exc:
+            # Surface to caller so the orchestration layer in main.py can log
+            # the full traceback and (importantly) not silently swallow auth
+            # failures or HA restarts that drop the entities. Previously this
+            # was a quiet log.error which made cluster-wide outages invisible.
             log.error("Failed to publish %s: %s", entity_id, exc)
+            raise

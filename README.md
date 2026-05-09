@@ -64,8 +64,13 @@ python -m watersight_export.main
 | `INFLUXDB_TOKEN` | No | — | InfluxDB v2 API token |
 | `INFLUXDB_ORG` | No | `""` | InfluxDB organization ID |
 | `INFLUXDB_BUCKET` | No | `water_insights` | InfluxDB bucket name |
-| `HA_URL` | No | — | Home Assistant URL (e.g., `http://192.168.1.15:8123`) |
-| `HA_TOKEN` | No | — | Home Assistant long-lived access token |
+| `HA_URL` | No | — | Home Assistant URL for **REST API** publishing (legacy; entities don't survive HA restarts) |
+| `HA_TOKEN` | No | — | Home Assistant long-lived access token (paired with `HA_URL`) |
+| `MQTT_HOST` | No | — | MQTT broker host for **HA Discovery** publishing (recommended; persists across HA restarts) |
+| `MQTT_PORT` | No | `1883` | MQTT broker port |
+| `MQTT_USERNAME` | No | — | MQTT broker username |
+| `MQTT_PASSWORD` | No | — | MQTT broker password |
+| `MQTT_DISCOVERY_PREFIX` | No | `homeassistant` | HA MQTT discovery prefix |
 | `SYNC_INTERVAL_HOURS` | No | `6` | Hours between syncs in daemon mode |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `DATA_DIR` | No | `/data` | Directory for persistent state |
@@ -80,9 +85,30 @@ WaterInsight Portal
         │
         ├──▶ InfluxDB v2 (hourly + daily time series)
         │
-        └──▶ Home Assistant (sensor.water_usage_daily_gallons,
-                             sensor.water_usage_monthly_gallons)
+        ├──▶ Home Assistant via MQTT Discovery (recommended)
+        │         retained topics under `homeassistant/sensor/watersight_water/...`
+        │         entities persist across HA restarts and broker reconnects
+        │
+        └──▶ Home Assistant via REST API (legacy)
+                  state set via `POST /api/states/<id>` is in-memory only —
+                  entities disappear when HA restarts and only come back the
+                  next time this exporter runs (up to `SYNC_INTERVAL_HOURS`
+                  later)
 ```
+
+### Home Assistant integration: pick one
+
+- **MQTT (recommended):** set `MQTT_HOST` (and credentials). The exporter
+  publishes HA Discovery configs once at startup, then writes retained state
+  to per-sensor topics. Sensors appear automatically as a single
+  *WaterInsight Export* device with availability tracking via LWT.
+- **REST API (legacy):** set `HA_URL` and `HA_TOKEN`. Works, but the entities
+  it creates are not persistent — every HA restart blanks them until the
+  next sync cycle pushes state again.
+
+You can enable both at once; MQTT will write to the canonical entities and
+the REST publisher will continue writing to the same `entity_id` names for
+backward compatibility.
 
 ## CI/CD
 
