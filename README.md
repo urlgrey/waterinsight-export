@@ -1,13 +1,13 @@
 # waterinsight-export
 
-Scrapes water usage data from [WaterInsight](https://benicia.waterinsight.com) portals (used by Benicia, CA and other municipalities) and exports it to **InfluxDB v2** and **Home Assistant**.
+Scrapes water usage data from [WaterInsight](https://benicia.waterinsight.com) portals (used by Benicia, CA and other municipalities) and exports it to **InfluxDB v2** and **Home Assistant via MQTT Discovery**.
 
 ## Features
 
 - **Hourly water usage** — fetched from WaterInsight's RealTimeChart API
 - **Daily usage** — from weatherConsumptionChart with historical backfill
 - **InfluxDB v2 export** — hourly + daily data with proper timestamps
-- **Home Assistant sensors** — `sensor.water_usage_daily_gallons` and `sensor.water_usage_monthly_gallons`
+- **Home Assistant via MQTT Discovery** — sensors auto-register as a *WaterInsight Export* device with retained state (persists across HA restarts) and availability tracking via Last Will
 - **Historical backfill** — on first run, imports all available history (back to 2017+)
 - **Incremental sync** — subsequent runs only fetch new data
 - **Daemon mode** — runs continuously with configurable sync interval
@@ -48,8 +48,9 @@ export WATERSIGHT_PASSWORD=yourpass
 export INFLUXDB_URL=http://192.168.1.15:8086
 export INFLUXDB_TOKEN=your_token
 export INFLUXDB_ORG=your_org
-export HA_URL=http://192.168.1.15:8123
-export HA_TOKEN=your_ha_token
+export MQTT_HOST=192.168.1.15
+export MQTT_USERNAME=ha
+export MQTT_PASSWORD=your_mqtt_password
 python -m watersight_export.main
 ```
 
@@ -64,8 +65,11 @@ python -m watersight_export.main
 | `INFLUXDB_TOKEN` | No | — | InfluxDB v2 API token |
 | `INFLUXDB_ORG` | No | `""` | InfluxDB organization ID |
 | `INFLUXDB_BUCKET` | No | `water_insights` | InfluxDB bucket name |
-| `HA_URL` | No | — | Home Assistant URL (e.g., `http://192.168.1.15:8123`) |
-| `HA_TOKEN` | No | — | Home Assistant long-lived access token |
+| `MQTT_HOST` | No | — | MQTT broker host for HA Discovery publishing |
+| `MQTT_PORT` | No | `1883` | MQTT broker port |
+| `MQTT_USERNAME` | No | — | MQTT broker username |
+| `MQTT_PASSWORD` | No | — | MQTT broker password |
+| `MQTT_DISCOVERY_PREFIX` | No | `homeassistant` | HA MQTT discovery prefix |
 | `SYNC_INTERVAL_HOURS` | No | `6` | Hours between syncs in daemon mode |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `DATA_DIR` | No | `/data` | Directory for persistent state |
@@ -80,9 +84,16 @@ WaterInsight Portal
         │
         ├──▶ InfluxDB v2 (hourly + daily time series)
         │
-        └──▶ Home Assistant (sensor.water_usage_daily_gallons,
-                             sensor.water_usage_monthly_gallons)
+        └──▶ Home Assistant via MQTT Discovery
+                  retained config + state topics under
+                  `homeassistant/sensor/watersight_water/...`
+                  entities persist across HA restarts and broker reconnects
 ```
+
+The exporter publishes HA Discovery configs once at startup, then writes
+retained state to per-sensor topics. Sensors appear automatically in HA as a
+single *WaterInsight Export* device, and HA marks them `unavailable` (via the
+Last Will topic) if the exporter stops running.
 
 ## CI/CD
 
@@ -109,8 +120,13 @@ fields:
 
 ### Home Assistant Sensors
 
-- `sensor.water_usage_daily_gallons` — today's total water usage in gallons
-- `sensor.water_usage_monthly_gallons` — current month's running total in gallons
+Auto-discovered as the *WaterInsight Export* device:
+
+- `sensor.water_usage_hourly_gallons` — latest hourly reading from the utility
+- `sensor.water_usage_daily_gallons` — yesterday's complete total
+- `sensor.water_usage_monthly_gallons` — month-to-date running total (state_class `total`, with monthly `last_reset` for HA statistics)
+- `sensor.water_usage_total_gallons` — cumulative meter total (state_class `total_increasing`, suitable for the Energy Dashboard)
+- `sensor.water_usage_last_updated` — timestamp of the latest record published by the utility
 
 ## License
 
