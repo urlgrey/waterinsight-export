@@ -10,7 +10,6 @@ from pathlib import Path
 
 from .watersight_client import WaterSightClient
 from .influxdb_writer import InfluxDBWriter
-from .ha_publisher import HAPublisher
 from .mqtt_publisher import MQTTPublisher
 
 log = logging.getLogger("watersight_export")
@@ -91,8 +90,7 @@ def compute_stats(hourly: list[dict]) -> dict:
 def sync_once(
     client: WaterSightClient,
     influx: InfluxDBWriter | None,
-    ha: HAPublisher | None,
-    mqtt_pub: MQTTPublisher | None = None,
+    mqtt_pub: MQTTPublisher | None,
 ) -> None:
     """Run a single sync cycle."""
     state = load_sync_state()
@@ -130,23 +128,17 @@ def sync_once(
         daily = client.get_daily()
         influx.write_daily(daily)
 
-    # 5. Publish to Home Assistant via MQTT (preferred) and/or REST API.
-    if hourly and (mqtt_pub or ha):
+    # 5. Publish to Home Assistant via MQTT Discovery
+    if mqtt_pub and hourly:
         stats = compute_stats(hourly)
-        publishers: list[HAPublisher | MQTTPublisher] = [
-            p for p in (mqtt_pub, ha) if p is not None
-        ]
-        for pub in publishers:
-            try:
-                pub.publish_hourly(stats["latest_gal"], stats["latest_ts"])
-                pub.publish_daily(stats["yesterday_gal"], stats["yesterday_date"])
-                pub.publish_monthly(stats["month_gal"], stats["month_label"])
-                pub.publish_total(stats["total_gal"])
-                pub.publish_last_updated(stats["latest_ts"])
-            except Exception:
-                log.exception(
-                    "Publish to %s failed", type(pub).__name__
-                )
+        try:
+            mqtt_pub.publish_hourly(stats["latest_gal"], stats["latest_ts"])
+            mqtt_pub.publish_daily(stats["yesterday_gal"], stats["yesterday_date"])
+            mqtt_pub.publish_monthly(stats["month_gal"], stats["month_label"])
+            mqtt_pub.publish_total(stats["total_gal"])
+            mqtt_pub.publish_last_updated(stats["latest_ts"])
+        except Exception:
+            log.exception("MQTT publish failed")
 
     # 6. Save sync state
     if hourly:
@@ -192,15 +184,7 @@ def main() -> None:
     else:
         log.warning("InfluxDB not configured — skipping InfluxDB writes")
 
-    # Optional: Home Assistant via REST API (legacy; entities don't survive HA restarts)
-    ha = None
-    ha_url = env("HA_URL")
-    ha_token = env("HA_TOKEN")
-    if ha_url and ha_token:
-        ha = HAPublisher(url=ha_url, token=ha_token)
-        log.info("Home Assistant REST output enabled: %s", ha_url)
-
-    # Optional: Home Assistant via MQTT Discovery (recommended; survives HA restarts)
+    # Home Assistant via MQTT Discovery
     mqtt_pub = None
     mqtt_host = env("MQTT_HOST")
     if mqtt_host:
@@ -221,11 +205,8 @@ def main() -> None:
         except Exception:
             log.exception("MQTT setup failed — continuing without MQTT")
             mqtt_pub = None
-
-    if not (ha or mqtt_pub):
-        log.warning(
-            "No Home Assistant output configured (set HA_URL+HA_TOKEN or MQTT_HOST)"
-        )
+    else:
+        log.warning("MQTT_HOST not set — skipping Home Assistant publishing")
 
     interval_hours = float(env("SYNC_INTERVAL_HOURS", "6"))
 
@@ -233,13 +214,13 @@ def main() -> None:
         log.info("Running in daemon mode (interval: %.1f hours)", interval_hours)
         while True:
             try:
-                sync_once(client, influx, ha, mqtt_pub)
+                sync_once(client, influx, mqtt_pub)
             except Exception:
                 log.exception("Sync failed — will retry next cycle")
             log.info("Sleeping %.1f hours...", interval_hours)
             time.sleep(interval_hours * 3600)
     else:
-        sync_once(client, influx, ha, mqtt_pub)
+        sync_once(client, influx, mqtt_pub)
 
     if influx:
         influx.close()
